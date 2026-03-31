@@ -1,158 +1,233 @@
-# Claude Code Rust
+<div align="center">
 
-![status](https://img.shields.io/badge/status-designing-blue)
-![language](https://img.shields.io/badge/language-Rust-E57324?logo=rust&logoColor=white)
-![origin](https://img.shields.io/badge/origin-Claude_Code_TS-8A2BE2)
-![focus](https://img.shields.io/badge/focus-Agent_Runtime-0F172A)
-![license](https://img.shields.io/badge/license-MIT-green)
+# 🦀 Claude Code Rust
 
-把 Claude Code 里的核心运行时思路拆出来，用 Rust 重新组织成一组可复用的 crate。
+**A modular agent runtime extracted from Claude Code, rebuilt in Rust.**
 
-这个项目关心的不是“把 TypeScript 一行一行翻过去”，而是把 agent 真正依赖的那部分能力整理清楚：消息循环、工具调用、权限控制、长任务、上下文压缩、模型接入，以及 MCP 扩展。
+[![Status](https://img.shields.io/badge/status-designing-blue?style=flat-square)](https://github.com/)
+[![Language](https://img.shields.io/badge/language-Rust-E57324?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Origin](https://img.shields.io/badge/origin-Claude_Code_TS-8A2BE2?style=flat-square)](https://docs.anthropic.com/en/docs/claude-code)
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](https://github.com/)
 
-<img src="./docs/assets/overview.svg" alt="项目总览" width="100%" />
+[English](./README.md) | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md) | [Español](./README.es.md) | [Français](./README.fr.md)
 
-## 这个项目是什么
+<img src="./docs/assets/overview.svg" alt="Project Overview" width="100%" />
 
-可以把它理解成一个面向 agent 的运行时骨架：
+</div>
 
-- 上层是一个很薄的 CLI，负责把各个 crate 组装起来。
-- 中间是核心运行时，包括消息循环、工具编排、权限、任务和模型抽象。
-- 底层是具体能力实现，比如内置工具、MCP 客户端和上下文治理。
+---
 
-如果这些边界划分得足够清晰，那么它不只能服务 Claude 风格的 coding agent，也可以作为别的 agent 系统的基础设施。
+## 📖 Table of Contents
 
-## 为什么要重做
+- [What is This](#-what-is-this)
+- [Why Rebuild in Rust](#-why-rebuild-in-rust)
+- [Design Goals](#-design-goals)
+- [Architecture](#-architecture)
+- [Crate Overview](#-crate-overview)
+- [Rust vs TypeScript](#-rust-vs-typescript)
+- [Roadmap](#-roadmap)
+- [Project Structure](#-project-structure)
+- [Contributing](#-contributing)
+- [References](#-references)
+- [License](#-license)
 
-Claude Code 的工程质量很高，但它本质上是一个完整产品，而不是一个容易复用的 runtime library。UI、运行时、工具系统和状态管理交织在一起，读源码能学到很多东西，但想把其中一部分单独拿出来复用并不轻松。
+## 💡 What is This
 
-这个项目想做的，是把那套已经被验证过的运行时设计重新整理一遍：
+This project extracts the core runtime ideas from [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and reorganizes them into a set of reusable Rust crates. It's not a line-by-line TypeScript translation — it's a clean-room redesign of the capabilities an agent truly depends on:
 
-- 把大块耦合逻辑拆成职责单一的 crate。
-- 把依赖运行时约束的部分改成 trait 和 enum 边界。
-- 把“只能在这个项目里工作”的实现，变成“可以被别的 agent 复用”的组件。
+- **Message Loop** — driving multi-turn conversations
+- **Tool Execution** — orchestrating tool calls with schema validation
+- **Permission Control** — authorization before file/shell/network access
+- **Long-running Tasks** — background execution with lifecycle management
+- **Context Compaction** — keeping long sessions stable under token budgets
+- **Model Providers** — unified interface for streaming LLM backends
+- **MCP Integration** — extending capabilities via Model Context Protocol
 
-## 设计目标
+Think of it as an **agent runtime skeleton**:
 
-1. **先抽象运行时，再补齐产品层。** 优先把 Agent loop、Tool、Task、Permission 这些基础能力做扎实。
-2. **每个 crate 都要能单独理解。** 看名字能猜到职责，读接口能知道边界。
-3. **让替换变得自然。** 工具、模型提供方、权限策略、压缩策略都应该能按需替换。
-4. **保留 Claude Code 的经验，但不照着 UI 和内部 feature 复刻。**
+| Layer | Role |
+|-------|------|
+| **Top** | A thin CLI that assembles all crates |
+| **Middle** | Core runtime: message loop, tool orchestration, permissions, tasks, model abstraction |
+| **Bottom** | Concrete implementations: built-in tools, MCP client, context management |
 
-## 架构总览
+> If the boundaries are clean enough, this can serve not only Claude-style coding agents, but any agent system that needs a solid runtime foundation.
 
-<img src="./docs/assets/architecture.svg" alt="架构总览" width="100%" />
+## 🤔 Why Rebuild in Rust
 
-| Crate | 作用 | 来自 Claude Code 的哪一层 |
-|------|------|------|
-| `agent-core` | 消息模型、状态容器、主循环、会话封装 | `query.ts`、`QueryEngine.ts`、`state/store.ts` |
-| `agent-tools` | 工具 trait、注册表、执行编排 | `Tool.ts`、`tools.ts`、工具服务层 |
-| `agent-tasks` | 长任务生命周期和通知机制 | `Task.ts`、`tasks.ts` |
-| `agent-permissions` | 工具调用授权与规则匹配 | `types/permissions.ts`、`utils/permissions/` |
-| `agent-provider` | 模型统一接口、流式处理、重试 | `services/api/` |
-| `agent-compact` | 上下文裁剪与 token 预算控制 | `services/compact/`、`query/tokenBudget.ts` |
-| `agent-mcp` | MCP 客户端、连接、发现与重连 | `services/mcp/` |
-| `tools-builtin` | 内置工具实现 | `tools/` |
-| `claude-cli` | 可执行入口，负责组装全部 crate | CLI 层 |
+Claude Code has excellent engineering quality, but it's a **complete product**, not a reusable runtime library. UI, runtime, tool systems, and state management are deeply intertwined. Reading the source teaches a lot, but extracting parts for reuse is nontrivial.
 
-## 这些模块分别解决什么问题
+This project aims to:
 
-### `agent-core`
+- **Decompose** tightly coupled logic into single-responsibility crates
+- **Replace** runtime constraints with trait and enum boundaries
+- **Transform** "only works inside this project" implementations into **reusable agent components**
 
-负责一轮对话怎么开始、怎么继续、什么时候停止。这里会定义统一的消息模型、主循环和会话状态，是整个系统的底座。
+## 🎯 Design Goals
 
-### `agent-tools`
+1. **Runtime first, product later.** Prioritize solid foundations for Agent loop, Tool, Task, and Permission.
+2. **Each crate should be self-explanatory.** Names reveal responsibility, interfaces reveal boundaries.
+3. **Make replacement natural.** Tools, model providers, permission policies, and compaction strategies should all be swappable.
+4. **Learn from Claude Code's experience** without replicating its UI or internal features.
 
-负责“工具长什么样”和“工具如何被调度”。Rust 版会避免把所有上下文都塞进一个巨大的对象里，而是按职责拆开，让工具只拿到它真正需要的部分。
+## 🏗 Architecture
 
-### `agent-tasks`
+<div align="center">
+<img src="./docs/assets/architecture.svg" alt="Architecture Overview" width="100%" />
+</div>
 
-负责后台任务。这个模块很重要，因为只有把 tool call 和 runtime task 分开，才容易支持长命令、后台 agent 和任务完成后的通知回灌。
+### Crate Map
 
-### `agent-permissions`
+| Crate | Purpose | Derived From (Claude Code) |
+|-------|---------|---------------------------|
+| `agent-core` | Message model, state container, main loop, session | `query.ts`, `QueryEngine.ts`, `state/store.ts` |
+| `agent-tools` | Tool trait, registry, execution orchestration | `Tool.ts`, `tools.ts`, tool service layer |
+| `agent-tasks` | Long task lifecycle and notification mechanism | `Task.ts`, `tasks.ts` |
+| `agent-permissions` | Tool call authorization and rule matching | `types/permissions.ts`, `utils/permissions/` |
+| `agent-provider` | Unified model interface, streaming, retry | `services/api/` |
+| `agent-compact` | Context trimming and token budget control | `services/compact/`, `query/tokenBudget.ts` |
+| `agent-mcp` | MCP client, connection, discovery, reconnect | `services/mcp/` |
+| `tools-builtin` | Built-in tool implementations | `tools/` |
+| `claude-cli` | Executable entry point, assembles all crates | CLI layer |
 
-负责授权模型能做什么、什么时候必须问用户、什么时候要直接拒绝。只要 agent 会读文件、写文件或执行命令，这一层就绕不开。
+## 🔍 Crate Overview
 
-### `agent-provider`
+<details>
+<summary><b>agent-core</b> — The foundation</summary>
 
-负责屏蔽不同模型后端的差异，统一流式输出、重试和错误恢复逻辑。
+Manages how a conversation turn starts, continues, and stops. Defines the unified message model, main loop, and session state. This is the bedrock of the entire system.
+</details>
 
-### `agent-compact`
+<details>
+<summary><b>agent-tools</b> — Tool definition & dispatch</summary>
 
-负责长会话稳定性。不是简单做“摘要”，而是根据场景做不同层次的压缩和预算控制，避免上下文无限增长。
+Defines "what a tool looks like" and "how tools are scheduled." The Rust version avoids stuffing all context into one giant object — instead, tools only receive the parts they actually need.
+</details>
 
-### `agent-mcp`
+<details>
+<summary><b>agent-tasks</b> — Background task runtime</summary>
 
-负责接入外部 MCP 服务，把远程 tool、resource、prompt 纳入统一的能力面。
+Separating tool calls from runtime tasks is critical for supporting long commands, background agents, and completion notifications fed back into the conversation.
+</details>
 
-### `tools-builtin`
+<details>
+<summary><b>agent-permissions</b> — Authorization layer</summary>
 
-负责最常用的内置工具，优先级会放在文件、命令、搜索和编辑这些 agent 的基本操作上。
+Controls what the agent can do, when it must ask the user, and when to refuse outright. Essential whenever agents read files, write files, or execute commands.
+</details>
 
-## 和 TypeScript 版相比，Rust 版会更强调什么
+<details>
+<summary><b>agent-provider</b> — Model abstraction</summary>
 
-| TypeScript 版常见做法 | Rust 版对应思路 |
-|------|------|
-| 大量运行时判断 | 尽量前移到类型系统里 |
-| 容易膨胀的上下文对象 | 拆成更小的 context / trait 边界 |
-| 分散的 callback 和 event | 尽量统一成更连续的事件流 |
-| 运行时 feature 开关 | 能在编译期裁剪的尽量编译期处理 |
-| UI 和运行时耦合较深 | 优先把 runtime 独立出来 |
+Shields the system from differences between model backends. Unifies streaming output, retry logic, and error recovery.
+</details>
 
-这不是说 Rust 一定更“高级”，而是它更适合把运行时边界钉死。对于一个长期演进的 agent 系统来说，这样的约束通常是有价值的。
+<details>
+<summary><b>agent-compact</b> — Context management</summary>
 
-## 实现路线
+Ensures long session stability. Not just "summarization" — applies different compression levels and budget controls based on context to prevent unbounded growth.
+</details>
 
-<img src="./docs/assets/roadmap.svg" alt="实现路线" width="100%" />
+<details>
+<summary><b>agent-mcp</b> — MCP integration</summary>
 
-### Phase 1：先跑起来
+Connects to external MCP services, bringing remote tools, resources, and prompts into the unified capability surface.
+</details>
 
-- 建立 `agent-core`、`agent-tools`、`agent-provider`、`agent-permissions`
-- 先实现最基础的 `Bash`、`FileRead`、`FileWrite`
-- 提供一个最小可运行的 CLI
+<details>
+<summary><b>tools-builtin</b> — Built-in tools</summary>
 
-目标是先得到一个能对话、能调工具、能执行命令和读写文件的基础版本。
+Implements the most commonly used tools, prioritizing file operations, shell commands, search, and editing — the basic operations any agent needs.
+</details>
 
-### Phase 2：把会话做稳
+## ⚖️ Rust vs TypeScript
 
-- 加入 `agent-tasks`，支持后台任务与通知
-- 加入 `agent-compact`，解决长会话和大结果处理
-- 扩展 `tools-builtin`，补齐编辑、搜索和子 agent 能力
+| TypeScript (Claude Code) | Rust Approach |
+|--------------------------|---------------|
+| Extensive runtime checks | Push checks into the type system |
+| Context objects tend to grow unbounded | Smaller context / trait boundaries |
+| Scattered callbacks and events | Unified, continuous event streams |
+| Runtime feature flags | Compile-time feature gating where possible |
+| UI and runtime tightly coupled | Runtime as an independent layer |
 
-目标是让 session 可以持续更久，不因为输出过大或任务过长而变得脆弱。
+> This isn't about Rust being "better" — it's about Rust being well-suited for **locking down runtime boundaries**. For a long-evolving agent system, such constraints are typically valuable.
 
-### Phase 3：把边界打开
+## 🗺 Roadmap
 
-- 接入 `agent-mcp`
-- 补更完整的插件/技能加载能力
-- 支持更适合嵌入式场景的 SDK / headless 用法
+<div align="center">
+<img src="./docs/assets/roadmap.svg" alt="Roadmap" width="100%" />
+</div>
 
-目标是让它不只是一个 CLI，而是一套可以集成进别的系统里的 agent runtime。
+### Phase 1: Get It Running
 
-## 目录结构
+- Set up `agent-core`, `agent-tools`, `agent-provider`, `agent-permissions`
+- Implement basic `Bash`, `FileRead`, `FileWrite` tools
+- Deliver a minimal runnable CLI
 
-当前仓库里最重要的文件不多：
+> **Goal:** A basic version that can chat, call tools, execute commands, and read/write files.
+
+### Phase 2: Make Sessions Stable
+
+- Add `agent-tasks` for background tasks and notifications
+- Add `agent-compact` for long sessions and large result handling
+- Expand `tools-builtin` with editing, search, and sub-agent capabilities
+
+> **Goal:** Sessions that can last longer without becoming fragile due to oversized outputs or long-running tasks.
+
+### Phase 3: Open the Boundaries
+
+- Integrate `agent-mcp`
+- Add plugin/skill loading capabilities
+- Support SDK / headless usage for embedded scenarios
+
+> **Goal:** Not just a CLI, but a complete agent runtime that can be integrated into other systems.
+
+## 📁 Project Structure
 
 ```text
 rust-clw/
-├── README.md
-├── ARCHITECTURE.zh-CN.md
+├── README.md                # English documentation
+├── README.zh-CN.md          # 简体中文文档
+├── README.ja.md             # 日本語ドキュメント
+├── README.ko.md             # 한국어 문서
+├── README.es.md             # Documentación en español
+├── README.fr.md             # Documentation en français
+├── ARCHITECTURE.zh-CN.md    # Architecture analysis of Claude Code (TS)
 └── docs/
     └── assets/
-        ├── overview.svg
-        ├── architecture.svg
-        └── roadmap.svg
+        ├── overview.svg     # Project overview diagram
+        ├── architecture.svg # Architecture diagram
+        └── roadmap.svg      # Roadmap diagram
 ```
 
-等各个 crate 真正落地之后，这里会继续展开成一个 Rust workspace。
+> Once the crates land, this will expand into a full Rust workspace.
 
+## 🤝 Contributing
 
-## 参考
+Contributions are welcome! This project is in its early design phase, and there are many ways to help:
 
-- [ARCHITECTURE.zh-CN.md](./ARCHITECTURE.zh-CN.md)：对 TypeScript 版 Claude Code 的拆解笔记
-- [Claude Code 官方文档](https://docs.anthropic.com/en/docs/claude-code)
+- **Architecture feedback** — Review the crate design and suggest improvements
+- **RFC discussions** — Propose new ideas via issues
+- **Documentation** — Help improve or translate documentation
+- **Implementation** — Pick up crate implementation once designs stabilize
+
+Please feel free to open an issue or submit a pull request.
+
+## 📚 References
+
+- [ARCHITECTURE.zh-CN.md](./ARCHITECTURE.zh-CN.md) — Detailed teardown of Claude Code's TypeScript architecture
+- [Claude Code Official Docs](https://docs.anthropic.com/en/docs/claude-code)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 
-## License
+## 📄 License
 
-MIT
+This project is licensed under the [MIT License](./LICENSE).
+
+---
+
+<div align="center">
+
+**If you find this project useful, please consider giving it a ⭐**
+
+</div>

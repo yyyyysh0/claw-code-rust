@@ -28,9 +28,9 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Build release binary
-      run: cargo build --release --bin claw-cli --verbose
+      run: cargo build --release --bin claw-rs --verbose
 
     - name: Upload release assets
       uses: softprops/action-gh-release@v1
       with:
-        files: target/release/claw-cli
+        files: target/release/claw-rs

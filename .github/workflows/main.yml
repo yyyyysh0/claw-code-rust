@@ -1,7 +1,11 @@
 name: Release
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name (e.g., v0.1.0)'
+        required: true
   release:
     types: [published]
 
@@ -34,3 +38,4 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: target/release/claw-rs
+        tag_name: ${{ github.event.inputs.tag || github.ref_name }}

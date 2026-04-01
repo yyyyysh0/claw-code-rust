@@ -29,11 +29,26 @@ impl AnthropicProvider {
         }
     }
 
-    pub fn with_base_url(self, base_url: impl Into<String>) -> Self {
+    /// Create a new provider with both API key and custom base URL.
+    /// Use this instead of chaining new() + with_base_url() to avoid losing the API key.
+    pub fn new_with_url(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
         let client = Client::builder()
+            .api_key(api_key.into())
             .base_url(base_url.into())
             .build()
-            .expect("failed to build Anthropic client");
+            .expect("failed to build Anthropic client with custom base URL");
+        Self { client }
+    }
+
+    /// Add a custom base URL to an existing provider.
+    /// NOTE: This re-creates the client, so prefer new_with_url() when both
+    /// api_key and base_url are available at construction time.
+    pub fn with_base_url(self, api_key: String, base_url: impl Into<String>) -> Self {
+        let client = Client::builder()
+            .api_key(api_key)
+            .base_url(base_url.into())
+            .build()
+            .expect("failed to build Anthropic client with custom base URL");
         Self { client }
     }
 }

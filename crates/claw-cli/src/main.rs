@@ -136,10 +136,16 @@ async fn main() -> Result<()> {
         skill_registry.load_from_dir(skills_dir)?;
     }
     
-    // Also try loading from default skills directory
-    let default_skills_dir = cwd.join(".claude/skills");
+    // Also try loading from default skills directory (user home)
+    let default_skills_dir = dirs::home_dir()
+        .map(|h| h.join(".claude/skills"))
+        .unwrap_or_else(|| cwd.join(".claude/skills"));
+    
     if default_skills_dir.exists() {
-        skill_registry.load_from_dir(&default_skills_dir)?;
+        match skill_registry.load_from_dir(&default_skills_dir) {
+            Ok(count) => eprintln!("Loaded {} custom skills from {:?}", count, default_skills_dir),
+            Err(e) => eprintln!("Error loading skills from {:?}: {}", default_skills_dir, e),
+        }
     }
     
     let skill_registry = Arc::new(skill_registry);

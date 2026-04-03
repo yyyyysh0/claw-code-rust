@@ -2,10 +2,14 @@
 name: code-review
 description: Review code for quality, security, and best practices
 triggers:
-  - command: /review
-  - pattern: "review.*code"
-  - keyword:
-      keywords: [review, critique, analyze code]
+  - type: command
+    command: /review
+    alias: [/r]
+  - type: pattern
+    pattern: "review.*code"
+    case_insensitive: true
+  - type: keyword
+    keywords: [review, critique, analyze code]
 tools: [file_read, glob, grep]
 context_files:
   - README.md

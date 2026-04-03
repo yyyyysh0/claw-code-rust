@@ -2,10 +2,13 @@
 name: git-commit
 description: Generate well-structured git commit messages following conventions
 triggers:
-  - command: /commit
-  - pattern: "commit.*changes"
-  - keyword:
-      keywords: [commit, git commit, make a commit]
+  - type: command
+    command: /commit
+  - type: pattern
+    pattern: "commit.*changes"
+    case_insensitive: true
+  - type: keyword
+    keywords: [commit, git commit, make a commit]
 tools: [bash, file_read, glob]
 context_files:
   - .git/COMMIT_EDITMSG

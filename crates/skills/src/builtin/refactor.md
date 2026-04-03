@@ -2,10 +2,13 @@
 name: refactor
 description: Analyze and refactor code for improved maintainability
 triggers:
-  - command: /refactor
-  - pattern: "refactor.*"
-  - keyword:
-      keywords: [refactor, clean up, simplify, optimize code]
+  - type: command
+    command: /refactor
+  - type: pattern
+    pattern: "refactor.*"
+    case_insensitive: true
+  - type: keyword
+    keywords: [refactor, clean up, simplify, optimize code]
 tools: [file_read, file_edit, file_write, glob, grep, bash]
 denied_tools: []  # All tools allowed for refactoring
 priority: 7

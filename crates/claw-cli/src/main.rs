@@ -36,10 +36,29 @@ impl std::str::FromStr for OutputFormat {
 }
 
 /// Claw RS — a modular agent runtime with skills support.
+///
+/// Usage:
+///   claw-rs.exe                      # Interactive mode (reads config from ~/.claude/config.json)
+///   claw-rs.exe -m qwen3-max         # Specify model via CLI
+///   claw-rs.exe -q "Hello!"          # Single prompt mode
+///
+/// Configuration:
+///   Create ~/.claude/config.json with:
+///   {
+///     "provider": "openai",
+///     "model": "your-model-name",
+///     "base_url": "https://api.example.com/v1",
+///     "api_key": "sk-your-key"
+///   }
+///
+/// Skills:
+///   Skills are loaded from ~/.claude/skills/ by default.
+///   Create .md files with YAML frontmatter to define custom skills.
+///   Use --list-skills to see all loaded skills.
 #[derive(Parser, Debug)]
-#[command(name = "claw-rs", version, about)]
+#[command(name = "claw-rs", version, about, long_about = None)]
 struct Cli {
-    /// Model to use (e.g. claude-sonnet-4-20250514, qwen3.5:9b)
+    /// Model to use (e.g. claude-sonnet-4-20250514, qwen3.5:9b). Overrides ~/.claude/config.json
     #[arg(short, long)]
     model: Option<String>,
 
@@ -80,7 +99,7 @@ struct Cli {
     #[arg(long, default_value = "http://localhost:11434")]
     ollama_url: String,
 
-    /// Skills directory to load skills from
+    /// Skills directory to load skills from (default: ~/.claude/skills/)
     #[arg(long)]
     skills_dir: Option<String>,
 

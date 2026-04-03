@@ -110,7 +110,9 @@ pub fn resolve_provider(
 
     let api_key = env.api_key.clone().or(file.api_key.clone());
     let base_url = env.base_url.clone().or(file.base_url.clone());
-    let model_override = cli_model.map(|s| s.to_string());
+    let model_override = cli_model
+        .map(|s| s.to_string())
+        .or(file.model.clone());
 
     // If we have a provider, build it
     if let Some(ref name) = provider_name {

@@ -16,6 +16,7 @@ claw-provider = { workspace = true }
 claw-permissions = { workspace = true }
 claw-tasks = { workspace = true }
 claw-compact = { workspace = true }
+claw-skills = { workspace = true }
 
 tokio = { workspace = true }
 futures = { workspace = true }

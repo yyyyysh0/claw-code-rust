@@ -7,6 +7,7 @@ use clap::Parser;
 use claw_core::{query, Message, QueryEvent, SessionConfig, SessionState};
 use claw_permissions::PermissionMode;
 use claw_tools::{ToolOrchestrator, ToolRegistry};
+use claw_skills::{SkillActivator, SkillRegistry, SessionSkillExt};
 
 mod config;
 mod onboarding;
@@ -34,7 +35,7 @@ impl std::str::FromStr for OutputFormat {
     }
 }
 
-/// Claw RS — a modular agent runtime.
+/// Claw RS — a modular agent runtime with skills support.
 #[derive(Parser, Debug)]
 #[command(name = "claw-rs", version, about)]
 struct Cli {
@@ -78,6 +79,18 @@ struct Cli {
     /// Ollama server URL
     #[arg(long, default_value = "http://localhost:11434")]
     ollama_url: String,
+
+    /// Skills directory to load skills from
+    #[arg(long)]
+    skills_dir: Option<String>,
+
+    /// Disable skill auto-activation
+    #[arg(long)]
+    no_skills: bool,
+
+    /// List available skills
+    #[arg(long)]
+    list_skills: bool,
 }
 
 #[tokio::main]
@@ -112,6 +125,58 @@ async fn main() -> Result<()> {
     let registry = Arc::new(registry);
     let orchestrator = ToolOrchestrator::new(Arc::clone(&registry));
 
+    // Initialize skill registry
+    let mut skill_registry = SkillRegistry::new();
+    
+    // Load built-in skills
+    claw_skills::register_builtin_skills(&mut skill_registry);
+    
+    // Load skills from directory if specified
+    if let Some(skills_dir) = &cli.skills_dir {
+        skill_registry.load_from_dir(skills_dir)?;
+    }
+    
+    // Also try loading from default skills directory
+    let default_skills_dir = cwd.join(".claude/skills");
+    if default_skills_dir.exists() {
+        skill_registry.load_from_dir(&default_skills_dir)?;
+    }
+    
+    let skill_registry = Arc::new(skill_registry);
+    let skill_activator = SkillActivator::new(Arc::clone(&skill_registry), cwd.clone());
+
+    // Handle --list-skills
+    if cli.list_skills {
+        println!("Available Skills:");
+        println!("================\n");
+        for skill in skill_registry.list() {
+            println!("  {} (priority: {})", skill.name, skill.metadata.priority);
+            if !skill.description.is_empty() {
+                println!("    {}", skill.description);
+            }
+            if !skill.metadata.triggers.is_empty() {
+                println!("    triggers:");
+                for trigger in &skill.metadata.triggers {
+                    match trigger {
+                        claw_skills::SkillTrigger::SlashCommand { command, alias } => {
+                            println!("      - command: {} (aliases: {})", command, alias.join(", "));
+                        }
+                        claw_skills::SkillTrigger::PatternMatch { pattern, .. } => {
+                            println!("      - pattern: {}", pattern);
+                        }
+                        claw_skills::SkillTrigger::Keywords { keywords } => {
+                            println!("      - keywords: {}", keywords.join(", "));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            println!();
+        }
+        println!("Use skills with slash commands (e.g., /review) or let them auto-activate on keywords.");
+        return Ok(());
+    }
+
     // Resolve provider: CLI flags > env vars > config file > onboarding
     let resolved = config::resolve_provider(
         cli.provider.as_deref(),
@@ -128,10 +193,18 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let mut session = SessionState::new(session_config, cwd);
+    let mut session = SessionState::new(session_config, cwd.clone());
 
     // Single-query / print mode
     if let Some(prompt) = single_prompt {
+        // Check for skill activation
+        if !cli.no_skills {
+            if let Some(skill_match) = skill_activator.should_auto_activate(&prompt) {
+                let activation = skill_activator.activate(skill_match).await?;
+                session.apply_skill_activation(activation);
+            }
+        }
+        
         session.push_message(Message::user(prompt));
         let on_event = make_event_callback(cli.output_format);
         query(
@@ -177,7 +250,10 @@ async fn main() -> Result<()> {
 
     // Interactive REPL
     println!("Claw RS v{}", env!("CARGO_PKG_VERSION"));
-    println!("Type your message, or 'exit' / Ctrl-D to quit.\n");
+    println!("Type your message, or 'exit' / Ctrl-D to quit.");
+    println!("Skills: {} loaded, use /review, /commit, /refactor or keywords.", 
+             skill_registry.count());
+    println!();
 
     let on_event = make_event_callback(OutputFormat::Text);
     let stdin = io::stdin();
@@ -196,6 +272,33 @@ async fn main() -> Result<()> {
         if line == "exit" || line == "quit" {
             break;
         }
+        
+        // Handle skill listing command
+        if line == "/skills" {
+            println!("\nAvailable Skills:");
+            for skill in skill_registry.list() {
+                println!("  {} - {}", skill.name, skill.description);
+            }
+            println!();
+            continue;
+        }
+
+        // Check for skill activation
+        if !cli.no_skills {
+            let matches = skill_activator.prefetch(line);
+            if !matches.is_empty() {
+                // Show which skill(s) are being activated
+                for m in &matches {
+                    eprintln!("🎯 Activating skill: {}", m.skill.name);
+                }
+                
+                // Activate the best match
+                if let Some(best) = matches.first() {
+                    let activation = skill_activator.activate(best.clone()).await?;
+                    session.apply_skill_activation(activation);
+                }
+            }
+        }
 
         session.push_message(Message::user(line));
 
@@ -210,6 +313,8 @@ async fn main() -> Result<()> {
         {
             eprintln!("error: {}", e);
         }
+        
+        println!();
     }
 
     eprintln!(

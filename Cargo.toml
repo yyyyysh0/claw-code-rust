@@ -8,6 +8,7 @@ members = [
     "crates/tasks",
     "crates/compact",
     "crates/mcp",
+    "crates/skills",
     "crates/claw-cli",
 ]
 
@@ -26,6 +27,7 @@ claw-permissions = { path = "crates/permissions" }
 claw-tasks = { path = "crates/tasks" }
 claw-compact = { path = "crates/compact" }
 claw-mcp = { path = "crates/mcp" }
+claw-skills = { path = "crates/skills" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -36,6 +38,7 @@ async-trait = "0.1"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 
 # Error handling
 thiserror = "2"
